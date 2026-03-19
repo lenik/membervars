@@ -42,7 +42,7 @@ exe_inc = include_directories(
     '.',
 )
 
-executable(
+membervars_exe = executable(
     'membervars',
     'membervars.c',
     dependencies: exe_deps,
@@ -56,5 +56,17 @@ install_man('man/membervars.1')
 install_data(
     'completions/membervars',
     install_dir: get_option('datadir') / 'bash-completion' / 'completions',
+)
+
+sh_prog = find_program('sh')
+
+test(
+    'membervars-conversion',
+    sh_prog,
+    args: [
+        files('tests/test_membervars.sh'),
+        membervars_exe,
+        meson.project_source_root(),
+    ],
 )
 

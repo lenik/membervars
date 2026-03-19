@@ -15,6 +15,9 @@ meson setup build
 meson compile -C build
 ```
 
+`--version` output is taken from `VERSION` in generated `config.h`, which is
+derived from the Meson project version.
+
 ## Usage
 
 ```bash
@@ -29,6 +32,21 @@ Options:
 - `-q`, `--quiet` Decrease log verbosity
 - `-h`, `--help` Show help
 - `--version` Show version
+
+## Tests
+
+Run the test suite with:
+
+```bash
+meson test -C build --print-errorlogs
+```
+
+The main conversion regression test uses fixture files in `examples/`.
+
+## Examples
+
+- `examples/m_to_u_input.cpp` -> `examples/m_to_u_expected.cpp`
+- `examples/u_to_m_input.cpp` -> `examples/u_to_m_expected.cpp`
 
 ## Bash completion
 

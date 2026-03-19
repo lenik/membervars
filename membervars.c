@@ -15,10 +15,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "config.h"
+
 #include <bas/log/uselog.h>
 #include <bas/log/deflog.h>
-
-#define TOOL_VERSION "0.1.0"
 
 DEFINE_LOGGER;
 
@@ -502,7 +502,7 @@ int main(int argc, char *argv[]) {
                 print_usage(argv[0]);
                 return EXIT_SUCCESS;
             case 1000:
-                printf("membervars %s\n", TOOL_VERSION);
+                printf("membervars %s\n", VERSION);
                 return EXIT_SUCCESS;
             default:
                 print_usage(argv[0]);
