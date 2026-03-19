@@ -18,10 +18,14 @@ run_case() {
     cmp -s "$work_file" "$TESTS_DIR/${name}.out.cpp"
 }
 
-run_case "-u" "m_to_u_basic"
-run_case "-m" "u_to_m_basic"
-run_case "-u" "m_to_u_params"
-run_case "-u" "m_to_u_several"
-run_case "-m" "u_to_m_nested"
+run_case "-u" "m2u_basic"
+run_case "-m" "u2m_basic"
+run_case "-u" "m2u_params"
+run_case "-u" "m2u_ctor"
+run_case "-u" "m2u_default"
+run_case "-u" "m2u_impl"
+run_case "-u" "m2u_several"
+run_case "-m" "u2m_nested"
+run_case "-m" "u2m_Shell"
 
 echo "membervars tests passed"

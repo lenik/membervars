@@ -72,7 +72,7 @@ Run the test suite with:
 meson test -C build --print-errorlogs
 ```
 
-The conversion tests use input/expected pairs in `tests/` (e.g. `tests/m_to_u_basic.in.cpp` and `tests/m_to_u_basic.out.cpp`).
+The conversion tests use input/expected pairs in `tests/` (e.g. `tests/m2u_basic.in.cpp` and `tests/m2u_basic.out.cpp`).
 
 ## Release iteration
 
@@ -87,7 +87,7 @@ The script copies that version into `meson.build` and `man/membervars.1`, runs b
 
 ## Examples
 
-- `tests/m_to_u_basic.in.cpp` → `tests/m_to_u_basic.out.cpp` (and other pairs in `tests/`)
+- `tests/m2u_basic.in.cpp` → `tests/m2u_basic.out.cpp` (and other pairs in `tests/`)
 - Example fixtures are also in `examples/` for reference.
 
 ## Bash completion
