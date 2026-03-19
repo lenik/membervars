@@ -40,6 +40,21 @@ Only member variables are renamed; identifiers in parameter lists (after `(` or 
 
 The goal is a "safe enough" lexical conversion: it does not require a full C++ parser, but it handles common real-world code patterns while avoiding the most frequent false replacements.
 
+### Tokenization and scope tracking
+
+The scanner only treats sequences that look like identifiers (`[A-Za-z_][A-Za-z0-9_]*`) as tokens. It does not try to fully parse C++, so it limits itself to a few lexical/structural cues:
+
+- **Comments and literals**: once it enters `// ...`, `/* ... */`, `"..."`, or `'...'`, it copies characters verbatim until the matching terminator is reached (handling backslash escapes inside strings/chars).
+- **Identifier conversion**: conversion happens only when an identifier token matches the active naming rule:
+  - `m_<name>` -> `<name>_` (`-u`)
+  - `<name>_` -> `m_<name>` (`-m`)
+- **Member-access disambiguation**: identifiers preceded by `.` or `->` are treated as member-access context, so member fields can still be renamed even if they share names with parameters.
+- **Function-definition parameter protection**: when the scanner sees what looks like a function-definition parameter list (matching a `(` ... `)` and then checking that `:` or `{` follows), it records the parameter identifiers and protects them within that function’s brace scope. This prevents rewriting parameter *uses* into member-style names.
+
+### Limitations
+
+Because this is not a full parser, it may still fail or be conservative in edge cases like complicated macros, generated code, or unusual formatting/syntax. Use `--verbose` to help diagnose unexpected replacements.
+
 ## 原理说明
 
 `membervars` 不是用正则做全局替换，而是按字符扫描源码并维护一个轻量词法状态机：
@@ -53,6 +68,21 @@ The goal is a "safe enough" lexical conversion: it does not require a full C++ p
 - 默认就地改写文件；`-c/--stdout` 只输出转换结果，不落盘。
 
 这个实现目标是“足够安全的词法级转换”：不依赖完整 C++ 语法解析，但能覆盖常见工程代码场景并避免最常见误改。
+
+### 词法扫描与作用域跟踪
+
+扫描器只把看起来像标识符的序列（`[A-Za-z_][A-Za-z0-9_]*`）当作 token。它不尝试完整解析 C++，因此只依赖少量词法/结构线索：
+
+- **注释与字面量**：一旦进入 `// ...`、`/* ... */`、`"..."` 或 `'...'`，就会原样复制，直到遇到匹配的结束符号（字符串/字符字面量内部会处理反斜杠转义）。
+- **标识符转换**：只有当标识符 token 能匹配当前的命名规则时才会转换：
+  - `m_<name>` -> `<name>_`（`-u`）
+  - `<name>_` -> `m_<name>`（`-m`）
+- **成员访问消歧**：位于 `.` 或 `->` 前面的标识符被视为成员访问上下文，因此即使它们与参数同名，成员字段仍会被正确重命名。
+- **函数定义参数保护**：当扫描器发现类似“函数定义的参数列表”（匹配 `(` ... `)`，并在后面检查紧跟的是 `:` 或 `{`）时，会记录这些参数标识符，并在该函数的花括号作用域内保护它们。这样可以避免把参数 *使用* 改写成成员变量风格。
+
+### 局限性
+
+由于这不是完整解析器，它在复杂宏、生成代码或非常规格式/语法等边界场景中可能仍然会失败或保持保守。必要时可使用 `--verbose` 来定位意外替换的原因。
 
 ## Build
 

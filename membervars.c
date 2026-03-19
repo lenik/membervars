@@ -76,6 +76,114 @@ static bool ident_in_list(const char *token, size_t token_len, char **list, size
     return false;
 }
 
+static bool looks_like_function_def_params(const char *in, size_t in_len, size_t open_pos) {
+    /* Lightweight check:
+     * - find matching ')', tracking nested parentheses
+     * - then look ahead: if ':' or '{' appears before ';', ',', or '=', treat it as a function-def parameter list.
+     * This is intentionally not a full parser; it only needs to avoid treating calls like f(x) { ... } / f(x); as params.
+     */
+    int depth = 1;
+    size_t i = open_pos + 1;
+    enum { S_NORMAL = 0, S_STRING, S_CHAR, S_LINE_COMMENT, S_BLOCK_COMMENT } st = S_NORMAL;
+
+    while (i < in_len && depth > 0) {
+        char c = in[i];
+
+        if (st == S_NORMAL) {
+            if (c == '"' ) {
+                st = S_STRING;
+                i++;
+                continue;
+            }
+            if (c == '\'') {
+                st = S_CHAR;
+                i++;
+                continue;
+            }
+            if (c == '/' && i + 1 < in_len && in[i + 1] == '/') {
+                st = S_LINE_COMMENT;
+                i += 2;
+                continue;
+            }
+            if (c == '/' && i + 1 < in_len && in[i + 1] == '*') {
+                st = S_BLOCK_COMMENT;
+                i += 2;
+                continue;
+            }
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+            }
+            i++;
+            continue;
+        }
+
+        if (st == S_STRING) {
+            if (c == '\\' && i + 1 < in_len) {
+                i += 2;
+                continue;
+            }
+            if (c == '"') {
+                st = S_NORMAL;
+            }
+            i++;
+            continue;
+        }
+
+        if (st == S_CHAR) {
+            if (c == '\\' && i + 1 < in_len) {
+                i += 2;
+                continue;
+            }
+            if (c == '\'') {
+                st = S_NORMAL;
+            }
+            i++;
+            continue;
+        }
+
+        if (st == S_LINE_COMMENT) {
+            if (c == '\n') {
+                st = S_NORMAL;
+            }
+            i++;
+            continue;
+        }
+
+        /* S_BLOCK_COMMENT */
+        if (c == '*' && i + 1 < in_len && in[i + 1] == '/') {
+            st = S_NORMAL;
+            i += 2;
+            continue;
+        }
+        i++;
+    }
+
+    if (depth != 0) {
+        return false;
+    }
+
+    /* i is positioned just past the matching ')'. */
+    size_t close_pos = (i > 0) ? (i - 1) : open_pos;
+    size_t limit = (close_pos + 1 + 120 < in_len) ? (close_pos + 1 + 120) : in_len;
+
+    for (size_t k = close_pos + 1; k < limit; k++) {
+        char d = in[k];
+        if (isspace((unsigned char)d)) {
+            continue;
+        }
+        if (d == '{' || d == ':') {
+            return true;
+        }
+        if (d == ';' || d == ',' || d == '=') {
+            return false;
+        }
+    }
+
+    return false;
+}
+
 static bool has_member_access_before(const char *in, size_t pos) {
     size_t j = pos;
 
@@ -415,18 +523,19 @@ static bool transform_contents(const char *in,
                 continue;
             }
 
-            if (c == '(' || c == ',') {
-                skip_next_convertible_id = true;
-                if (c == '(') {
-                    if (last_token_was_ident && !is_control_keyword(last_ident, last_ident_len)) {
-                        collect_params = true;
-                        params_waiting_for_body = false;
-                        clear_ident_list(&pending_params, &pending_count, &pending_cap);
-                    } else {
-                        collect_params = false;
-                        params_waiting_for_body = false;
-                    }
+            if (c == '(') {
+                if (last_token_was_ident && !is_control_keyword(last_ident, last_ident_len)) {
+                    collect_params = looks_like_function_def_params(in, in_len, i);
+                    skip_next_convertible_id = collect_params;
+                    params_waiting_for_body = false;
+                    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                } else {
+                    collect_params = false;
+                    skip_next_convertible_id = false;
+                    params_waiting_for_body = false;
                 }
+            } else if (c == ',' && collect_params) {
+                skip_next_convertible_id = true;
             } else if (c == ')') {
                 skip_next_convertible_id = false;
                 if (collect_params) {
