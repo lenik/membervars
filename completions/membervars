@@ -5,13 +5,13 @@ _membervars_completions()
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     case "${prev}" in
-        -u|-m|-v|-q|-h|--help|--version|--verbose|--quiet)
+        -u|-m|-c|-v|-q|-h|--help|--version|--verbose|--quiet|--stdout)
             return 0
             ;;
     esac
 
     if [[ "${cur}" == -* ]]; then
-        COMPREPLY=( $(compgen -W "-u -m -v -q -h --help --version --verbose --quiet" -- "${cur}") )
+        COMPREPLY=( $(compgen -W "-u -m -c -v -q -h --help --version --verbose --quiet --stdout" -- "${cur}") )
     else
         COMPREPLY=( $(compgen -f -- "${cur}") )
     fi

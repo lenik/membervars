@@ -39,12 +39,13 @@ typedef enum {
 static void print_usage(const char *program_name) {
     printf("Usage: %s [OPTIONS] files...\n\n", program_name);
     printf("Options:\n");
-    printf("    -u      Convert member vars from m_<name> to <name>_\n");
-    printf("    -m      Convert member vars from <name>_ to m_<name>\n");
+    printf("    -u            Convert member vars from m_<name> to <name>_\n");
+    printf("    -m            Convert member vars from <name>_ to m_<name>\n");
+    printf("    -c, --stdout  Write converted output to stdout (do not modify files)\n");
     printf("    -v, --verbose\n");
     printf("    -q, --quiet\n");
     printf("    -h, --help\n");
-    printf("    --version\n");
+    printf("        --version\n");
 }
 
 static bool is_ident_start(unsigned char c) {
@@ -53,6 +54,87 @@ static bool is_ident_start(unsigned char c) {
 
 static bool is_ident_char(unsigned char c) {
     return (c == '_') || isalnum(c);
+}
+
+static bool is_control_keyword(const char *token, size_t token_len) {
+    return (token_len == 2 && memcmp(token, "if", 2) == 0) ||
+           (token_len == 3 && memcmp(token, "for", 3) == 0) ||
+           (token_len == 5 && memcmp(token, "while", 5) == 0) ||
+           (token_len == 6 && memcmp(token, "switch", 6) == 0) ||
+           (token_len == 5 && memcmp(token, "catch", 5) == 0) ||
+           (token_len == 6 && memcmp(token, "return", 6) == 0) ||
+           (token_len == 6 && memcmp(token, "sizeof", 6) == 0);
+}
+
+static bool ident_in_list(const char *token, size_t token_len, char **list, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        size_t n = strlen(list[i]);
+        if (n == token_len && memcmp(list[i], token, token_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool has_member_access_before(const char *in, size_t pos) {
+    size_t j = pos;
+
+    while (j > 0 && isspace((unsigned char)in[j - 1])) {
+        j--;
+    }
+    if (j == 0) {
+        return false;
+    }
+    if (in[j - 1] == '.') {
+        return true;
+    }
+    if (j >= 2 && in[j - 1] == '>' && in[j - 2] == '-') {
+        return true;
+    }
+    return false;
+}
+
+static bool add_ident_to_list(const char *token,
+                              size_t token_len,
+                              char ***list,
+                              size_t *count,
+                              size_t *cap) {
+    char *name;
+    char **grown;
+
+    if (ident_in_list(token, token_len, *list, *count)) {
+        return true;
+    }
+    if (*count >= *cap) {
+        size_t new_cap = (*cap == 0) ? 8 : (*cap * 2);
+        grown = (char **)realloc(*list, new_cap * sizeof(char *));
+        if (!grown) {
+            return false;
+        }
+        *list = grown;
+        *cap = new_cap;
+    }
+
+    name = (char *)malloc(token_len + 1);
+    if (!name) {
+        return false;
+    }
+    memcpy(name, token, token_len);
+    name[token_len] = '\0';
+
+    (*list)[*count] = name;
+    (*count)++;
+    return true;
+}
+
+static void clear_ident_list(char ***list, size_t *count, size_t *cap) {
+    for (size_t i = 0; i < *count; i++) {
+        free((*list)[i]);
+    }
+    free(*list);
+    *list = NULL;
+    *count = 0;
+    *cap = 0;
 }
 
 static char *slurp_file(const char *path, size_t *size_out) {
@@ -192,6 +274,21 @@ static bool transform_contents(const char *in,
     size_t cap = 0;
     size_t changes = 0;
 
+    bool skip_next_convertible_id = false; /* skip identifier in parameter position after ( or , */
+    bool collect_params = false;
+    bool params_waiting_for_body = false;
+    int brace_depth = 0;
+    int protected_scope_depth = -1;
+    char last_ident[256];
+    size_t last_ident_len = 0;
+    bool last_token_was_ident = false;
+    char **pending_params = NULL;
+    size_t pending_count = 0;
+    size_t pending_cap = 0;
+    char **protected_params = NULL;
+    size_t protected_count = 0;
+    size_t protected_cap = 0;
+
     while (i < in_len) {
         char c = in[i];
 
@@ -237,6 +334,8 @@ static bool transform_contents(const char *in,
                 size_t token_len;
                 char *converted = NULL;
                 size_t converted_len = 0;
+                bool would_convert = false;
+                bool blocked_by_parameter = false;
 
                 i++;
                 while (i < in_len && is_ident_char((unsigned char)in[i])) {
@@ -246,13 +345,48 @@ static bool transform_contents(const char *in,
 
                 if (!convert_identifier(in + start, token_len, mode, &converted, &converted_len)) {
                     free(result);
+                    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
                     return false;
+                }
+
+                if (protected_scope_depth >= 0 &&
+                    ident_in_list(in + start, token_len, protected_params, protected_count) &&
+                    !has_member_access_before(in, start)) {
+                    blocked_by_parameter = true;
+                }
+
+                would_convert = (converted != NULL);
+                if (would_convert && blocked_by_parameter) {
+                    free(converted);
+                    converted = NULL;
+                    converted_len = 0;
+                    would_convert = false;
+                }
+                if (would_convert && skip_next_convertible_id) {
+                    skip_next_convertible_id = false;
+                    if (collect_params &&
+                        !add_ident_to_list(in + start,
+                                           token_len,
+                                           &pending_params,
+                                           &pending_count,
+                                           &pending_cap)) {
+                        free(converted);
+                        free(result);
+                        clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                        clear_ident_list(&protected_params, &protected_count, &protected_cap);
+                        return false;
+                    }
+                    converted = NULL;
+                    converted_len = 0;
                 }
 
                 if (converted) {
                     if (!append_buf(&result, &len, &cap, converted, converted_len)) {
                         free(converted);
                         free(result);
+                        clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                        clear_ident_list(&protected_params, &protected_count, &protected_cap);
                         return false;
                     }
                     changes++;
@@ -260,14 +394,77 @@ static bool transform_contents(const char *in,
                 } else {
                     if (!append_buf(&result, &len, &cap, in + start, token_len)) {
                         free(result);
+                        clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                        clear_ident_list(&protected_params, &protected_count, &protected_cap);
                         return false;
                     }
+                }
+                /* clear skip after consuming any convertible candidate (converted or skipped) */
+                if (would_convert) {
+                    skip_next_convertible_id = false;
+                }
+                if (token_len < sizeof(last_ident)) {
+                    memcpy(last_ident, in + start, token_len);
+                    last_ident[token_len] = '\0';
+                    last_ident_len = token_len;
+                    last_token_was_ident = true;
+                } else {
+                    last_token_was_ident = false;
+                    last_ident_len = 0;
                 }
                 continue;
             }
 
+            if (c == '(' || c == ',') {
+                skip_next_convertible_id = true;
+                if (c == '(') {
+                    if (last_token_was_ident && !is_control_keyword(last_ident, last_ident_len)) {
+                        collect_params = true;
+                        params_waiting_for_body = false;
+                        clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                    } else {
+                        collect_params = false;
+                        params_waiting_for_body = false;
+                    }
+                }
+            } else if (c == ')') {
+                skip_next_convertible_id = false;
+                if (collect_params) {
+                    collect_params = false;
+                    params_waiting_for_body = true;
+                }
+            } else if (c == '{') {
+                brace_depth++;
+                if (params_waiting_for_body && pending_count > 0) {
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
+                    protected_params = pending_params;
+                    protected_count = pending_count;
+                    protected_cap = pending_cap;
+                    pending_params = NULL;
+                    pending_count = 0;
+                    pending_cap = 0;
+                    protected_scope_depth = brace_depth;
+                }
+                params_waiting_for_body = false;
+            } else if (c == '}') {
+                if (brace_depth > 0) {
+                    brace_depth--;
+                }
+                if (protected_scope_depth > brace_depth) {
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
+                    protected_scope_depth = -1;
+                }
+                params_waiting_for_body = false;
+            } else if (c == ';') {
+                params_waiting_for_body = false;
+                clear_ident_list(&pending_params, &pending_count, &pending_cap);
+            } else if (!isspace((unsigned char)c)) {
+                last_token_was_ident = false;
+            }
             if (!append_buf(&result, &len, &cap, &in[i], 1)) {
                 free(result);
+                clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                clear_ident_list(&protected_params, &protected_count, &protected_cap);
                 return false;
             }
             i++;
@@ -277,6 +474,8 @@ static bool transform_contents(const char *in,
         if (state == STATE_LINE_COMMENT) {
             if (!append_buf(&result, &len, &cap, &in[i], 1)) {
                 free(result);
+                clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                clear_ident_list(&protected_params, &protected_count, &protected_cap);
                 return false;
             }
             if (in[i] == '\n') {
@@ -290,6 +489,8 @@ static bool transform_contents(const char *in,
             if (i + 1 < in_len && in[i] == '*' && in[i + 1] == '/') {
                 if (!append_buf(&result, &len, &cap, "*/", 2)) {
                     free(result);
+                    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
                     return false;
                 }
                 i += 2;
@@ -297,6 +498,8 @@ static bool transform_contents(const char *in,
             } else {
                 if (!append_buf(&result, &len, &cap, &in[i], 1)) {
                     free(result);
+                    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
                     return false;
                 }
                 i++;
@@ -307,11 +510,15 @@ static bool transform_contents(const char *in,
         if (state == STATE_STRING) {
             if (!append_buf(&result, &len, &cap, &in[i], 1)) {
                 free(result);
+                clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                clear_ident_list(&protected_params, &protected_count, &protected_cap);
                 return false;
             }
             if (in[i] == '\\' && i + 1 < in_len) {
                 if (!append_buf(&result, &len, &cap, &in[i + 1], 1)) {
                     free(result);
+                    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
                     return false;
                 }
                 i += 2;
@@ -327,11 +534,15 @@ static bool transform_contents(const char *in,
         if (state == STATE_CHAR) {
             if (!append_buf(&result, &len, &cap, &in[i], 1)) {
                 free(result);
+                clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                clear_ident_list(&protected_params, &protected_count, &protected_cap);
                 return false;
             }
             if (in[i] == '\\' && i + 1 < in_len) {
                 if (!append_buf(&result, &len, &cap, &in[i + 1], 1)) {
                     free(result);
+                    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+                    clear_ident_list(&protected_params, &protected_count, &protected_cap);
                     return false;
                 }
                 i += 2;
@@ -348,10 +559,15 @@ static bool transform_contents(const char *in,
     if (!result) {
         result = (char *)malloc(1);
         if (!result) {
+            clear_ident_list(&pending_params, &pending_count, &pending_cap);
+            clear_ident_list(&protected_params, &protected_count, &protected_cap);
             return false;
         }
         result[0] = '\0';
     }
+
+    clear_ident_list(&pending_params, &pending_count, &pending_cap);
+    clear_ident_list(&protected_params, &protected_count, &protected_cap);
 
     *out = result;
     *out_len = len;
@@ -412,7 +628,7 @@ out:
     return rc;
 }
 
-static int process_file(const char *path, convert_mode_t mode, size_t *changes_out) {
+static int process_file(const char *path, convert_mode_t mode, bool to_stdout, size_t *changes_out) {
     struct stat st;
     char *input = NULL;
     char *output = NULL;
@@ -421,13 +637,15 @@ static int process_file(const char *path, convert_mode_t mode, size_t *changes_o
     size_t changes = 0;
     int rc = -1;
 
-    if (stat(path, &st) != 0) {
-        logerror_fmt("cannot stat '%s': %s", path, strerror(errno));
-        return -1;
-    }
-    if (!S_ISREG(st.st_mode)) {
-        logerror_fmt("'%s' is not a regular file", path);
-        return -1;
+    if (!to_stdout) {
+        if (stat(path, &st) != 0) {
+            logerror_fmt("cannot stat '%s': %s", path, strerror(errno));
+            return -1;
+        }
+        if (!S_ISREG(st.st_mode)) {
+            logerror_fmt("'%s' is not a regular file", path);
+            return -1;
+        }
     }
 
     input = slurp_file(path, &in_len);
@@ -440,13 +658,20 @@ static int process_file(const char *path, convert_mode_t mode, size_t *changes_o
         goto out;
     }
 
-    if (changes > 0) {
-        logdebug_fmt("%s: %zu replacements", path, changes);
-        if (write_file_atomic(path, output, out_len, st.st_mode & 0777) != 0) {
+    if (to_stdout) {
+        if (out_len > 0 && fwrite(output, 1, out_len, stdout) != out_len) {
+            logerror_fmt("failed to write to stdout");
             goto out;
         }
     } else {
-        logdebug_fmt("%s: no changes", path);
+        if (changes > 0) {
+            logdebug_fmt("%s: %zu replacements", path, changes);
+            if (write_file_atomic(path, output, out_len, st.st_mode & 0777) != 0) {
+                goto out;
+            }
+        } else {
+            logdebug_fmt("%s: no changes", path);
+        }
     }
 
     if (changes_out) {
@@ -471,12 +696,15 @@ int main(int argc, char *argv[]) {
     static struct option long_options[] = {
         {"verbose", no_argument, 0, 'v'},
         {"quiet", no_argument, 0, 'q'},
+        {"stdout", no_argument, 0, 'c'},
         {"help", no_argument, 0, 'h'},
         {"version", no_argument, 0, 1000},
         {0, 0, 0, 0}
     };
 
-    while ((opt = getopt_long(argc, argv, "umvqh", long_options, &option_index)) != -1) {
+    bool to_stdout = false;
+
+    while ((opt = getopt_long(argc, argv, "umvqch", long_options, &option_index)) != -1) {
         switch (opt) {
             case 'u':
                 if (mode != MODE_NONE && mode != MODE_TO_TRAILING_UNDERSCORE) {
@@ -497,6 +725,9 @@ int main(int argc, char *argv[]) {
                 break;
             case 'q':
                 log_less();
+                break;
+            case 'c':
+                to_stdout = true;
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -525,7 +756,7 @@ int main(int argc, char *argv[]) {
     for (int i = optind; i < argc; i++) {
         size_t file_changes = 0;
         file_count++;
-        if (process_file(argv[i], mode, &file_changes) != 0) {
+        if (process_file(argv[i], mode, to_stdout, &file_changes) != 0) {
             failures++;
             continue;
         }
