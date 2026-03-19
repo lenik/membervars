@@ -1,0 +1,20 @@
+Source: membervars
+Section: utils
+Priority: optional
+Maintainer: Lenik <membervars@bodz.net>
+Build-Depends:
+ debhelper-compat (= 13),
+ meson,
+ ninja-build,
+ pkgconf,
+ libbas-c-dev
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/lenik/membervars
+
+Package: membervars
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Convert member variable naming conventions in source files
+ membervars rewrites C/C++ identifiers to convert between m_<name> and
+ <name>_ conventions while skipping comments and string literals.

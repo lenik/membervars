@@ -1,0 +1,20 @@
+_membervars_completions()
+{
+    local cur prev
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "${prev}" in
+        -u|-m|-v|-q|-h|--help|--version|--verbose|--quiet)
+            return 0
+            ;;
+    esac
+
+    if [[ "${cur}" == -* ]]; then
+        COMPREPLY=( $(compgen -W "-u -m -v -q -h --help --version --verbose --quiet" -- "${cur}") )
+    else
+        COMPREPLY=( $(compgen -f -- "${cur}") )
+    fi
+}
+
+complete -F _membervars_completions membervars

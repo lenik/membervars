@@ -1,0 +1,41 @@
+.TH MEMBERVARS 1 "March 2026" "membervars 1.0.0" "User Commands"
+.SH NAME
+membervars \- convert member variable naming conventions
+.SH SYNOPSIS
+.B membervars
+[\fIOPTIONS\fR] \fIfiles...\fR
+.SH DESCRIPTION
+\fBmembervars\fR rewrites source files in place to convert member variable
+identifier styles.
+.PP
+It supports two conversion modes:
+.IP "\(bu" 2
+\fBm_<name>\fR to \fB<name>_\fR
+.IP "\(bu" 2
+\fB<name>_\fR to \fBm_<name>\fR
+.PP
+Replacements are skipped in comments, string literals, and character literals.
+.SH OPTIONS
+.TP
+.B \-u
+Convert member vars from \fBm_<name>\fR to \fB<name>_\fR.
+.TP
+.B \-m
+Convert member vars from \fB<name>_\fR to \fBm_<name>\fR.
+.TP
+.B \-v, \-\-verbose
+Increase logging verbosity.
+.TP
+.B \-q, \-\-quiet
+Decrease logging verbosity.
+.TP
+.B \-h, \-\-help
+Show help text.
+.TP
+.B \-\-version
+Show tool version.
+.SH AUTHOR
+Lenik <membervars@bodz.net>
+.SH LICENSE
+AGPL-3.0-or-later with an additional anti-AI statement. See the \fBLICENSE\fR
+file distributed with this project.
